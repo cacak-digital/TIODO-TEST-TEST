@@ -805,6 +805,11 @@
   }
 
   /* ── RESPONSIVE ── */
+  /* ── MOBILE GALLERY GRID (replaces scatter on touch) ── */
+  .mobile-gallery-grid {
+    display: none;
+  }
+
   @media (max-width: 900px) {
     nav { padding: 1.2rem 1.5rem; }
     .nav-links { display: none; }
@@ -823,6 +828,78 @@
     .about-img-badge { right: 0; }
     footer { flex-direction: column; gap: 1.5rem; text-align: center; }
     .contact-info { gap: 2rem; }
+
+    /* na mobitelu scatter se sklanja, stack se prikazuje */
+    .scatter-stage { display: none; }
+
+    /* ── STACK WRAPPER ── */
+    .mobile-gallery-grid {
+      display: block;
+      position: relative;
+      height: 62vw; /* visina jedne kartice */
+      margin-top: 1rem;
+    }
+
+    /* sticky kontejner koji drži gomilu karata */
+    .mg-stack {
+      position: sticky;
+      top: 0; /* JS setuje tačnu vrednost u runtime */
+      height: 62vw;
+      width: 100%;
+      pointer-events: none;
+    }
+
+    /* svaka karta je apsolutno pozicionirana, slaže se jedna na drugu */
+    .mg-item {
+      position: absolute;
+      inset: 0;
+      width: 82%;
+      margin: 0 auto;
+      left: 9%;
+      aspect-ratio: 3/4;
+      height: auto;
+      background: var(--stone-light);
+      box-shadow: 0 8px 32px rgba(28,26,24,0.18);
+      overflow: hidden;
+      cursor: zoom-in;
+      pointer-events: auto;
+      /* white border kao print */
+      outline: 6px solid #fff;
+      /* početno: dole i nevidljiva */
+      opacity: 0;
+      transform: translateY(60px) rotate(2deg) scale(0.92);
+      transition:
+        opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1),
+        transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .mg-item.mg-visible {
+      opacity: 1;
+      transform: translateY(0) rotate(0deg) scale(1);
+    }
+
+    /* svaka karta ima blago drugačiju rotaciju kad leži */
+    .mg-item:nth-child(odd)  { transform: translateY(0) rotate(-1.5deg) scale(1); }
+    .mg-item:nth-child(even) { transform: translateY(0) rotate( 1.2deg) scale(1); }
+    .mg-item:not(.mg-visible):nth-child(odd)  { transform: translateY(60px) rotate(2deg)  scale(0.92); opacity:0; }
+    .mg-item:not(.mg-visible):nth-child(even) { transform: translateY(60px) rotate(-2deg) scale(0.92); opacity:0; }
+
+    .mg-item img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .mg-item:active {
+      transform: scale(0.97) !important;
+    }
+
+    /* scroll spacer — svaka karta dodaje prostor za scroll */
+    .mg-spacer {
+      display: block;
+      height: 70vw;
+    }
   }
 </style>
 </head>
@@ -939,6 +1016,11 @@
       </div>
       <!-- cards injected by JS -->
     </div>
+  </div>
+
+  <!-- MOBILE GALLERY (CSS grid, prikazuje se samo na telefonu) -->
+  <div class="mobile-gallery-grid" id="mobileGalleryGrid">
+    <!-- items injected by JS -->
   </div>
 </section>
 
@@ -1172,8 +1254,15 @@ revealEls.forEach(el => revealIO.observe(el));
     modalImage.removeAttribute('src');
   }
 
+  function getNavHeight() {
+    const navEl = document.querySelector('nav');
+    return navEl ? navEl.getBoundingClientRect().height : 0;
+  }
+
   function updateGallery() {
     needsUpdate = false;
+    /* postavi sticky top = visina nav-a da karte ne idu ispod njega */
+    sticky.style.top = getNavHeight() + 'px';
     onScroll();
   }
 
@@ -1197,6 +1286,90 @@ revealEls.forEach(el => revealIO.observe(el));
     sticky.appendChild(div);
     return { el: div, cfg: c };
   });
+
+  /* ── MOBILE GRID ── */
+  /* ── MOBILE STACK GALLERY ──
+     Princip: wrapper ima visinu N * spacerHeight (koliko karata ima).
+     Unutar njega je .mg-stack koji je sticky.
+     Svaka karta dobija .mg-visible redosledom dok korisnik skroluje kroz
+     odgovarajući spacer segment — efekt slaganja karata na gomilu.
+  ── */
+  (function buildMobileStack() {
+    const wrapper = document.getElementById('mobileGalleryGrid');
+    if (!wrapper) return;
+
+    const SPACER_VW = 70; // px visine segmenta po karti (u vw jedinicama simuliramo kroz resize)
+
+    /* sticky kontejner */
+    const stack = document.createElement('div');
+    stack.className = 'mg-stack';
+    wrapper.appendChild(stack);
+
+    /* kreiraj karte i dodaj u stack */
+    const cardEls = IMAGE_FILES.map((src, i) => {
+      const item = document.createElement('div');
+      item.className = 'mg-item';
+      item.style.zIndex = i + 1; // svaka naredna je iznad
+      const img = document.createElement('img');
+      img.src = src;
+      img.alt = 'Tiodo Studio fotografija';
+      img.loading = 'lazy';
+      img.onerror = function() { item.style.background = '#E8E0D4'; this.style.display='none'; };
+      item.appendChild(img);
+      item.addEventListener('click', () => openGalleryImage(src));
+      stack.appendChild(item);
+      return item;
+    });
+
+    /* spaceri — određuju koliko dugo traje scroll za svaku kartu */
+    IMAGE_FILES.forEach(() => {
+      const sp = document.createElement('span');
+      sp.className = 'mg-spacer';
+      wrapper.appendChild(sp);
+    });
+
+    /* postavi visinu wrapper-a: sticky visina + N * spacer visina */
+    function setWrapperHeight() {
+      const spacerPx = window.innerWidth * (SPACER_VW / 100);
+      const stickyH  = window.innerWidth * 0.62; // 62vw
+
+      /* dinamički izmerimo nav + gallery header da sticky ne preseče ništa */
+      const navEl     = document.querySelector('nav');
+      const headerEl  = document.querySelector('.gallery-header');
+      const navH      = navEl     ? navEl.getBoundingClientRect().height     : 0;
+      const headerH   = headerEl  ? headerEl.getBoundingClientRect().height  : 0;
+      const GAP       = 16; // mali razmak ispod headera
+      const topOffset = navH + headerH + GAP;
+
+      stack.style.top = topOffset + 'px';
+      /* visina wrapper-a: od tačke gde sticky počinje do kraja svih spacera */
+      wrapper.style.height = (stickyH + IMAGE_FILES.length * spacerPx) + 'px';
+    }
+    setWrapperHeight();
+    window.addEventListener('resize', setWrapperHeight);
+
+    /* scroll → otkrij karte jednu po jednu */
+    function onMobileScroll() {
+      const rect      = wrapper.getBoundingClientRect();
+      const spacerPx  = window.innerWidth * (SPACER_VW / 100);
+      const stickyH   = window.innerWidth * 0.75;
+      // koliko smo scrollovali unutar wrapper-a (počinje kad sticky počne)
+      const scrolled  = Math.max(0, -rect.top);
+
+      cardEls.forEach((el, i) => {
+        // karta i se "baca" kad scrolled prođe i * spacerPx
+        const threshold = i * spacerPx;
+        if (scrolled >= threshold) {
+          el.classList.add('mg-visible');
+        } else {
+          el.classList.remove('mg-visible');
+        }
+      });
+    }
+
+    window.addEventListener('scroll', onMobileScroll, { passive: true });
+    onMobileScroll(); // inicijalno
+  })();
 
   function positionCard(el, cfg, progress) {
     /* progress 0 → card at origin (offscreen)
